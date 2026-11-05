@@ -1,62 +1,40 @@
-﻿TYPE "valve"
-VERSION : 0.1
-   STRUCT
-      Run : Bool;
-      Auto : Bool;
-      Manual : Bool;
-      TimeOut : Time := T#5s;
-      Open : Bool;
-      Close : Bool;
-      ManOpen : Bool;
-      ManClose : Bool;
-      AutoOpen : Bool;
-      AutoClose : Bool;
-      FaultOpen : Bool;
-      FaultClose : Bool;
-      AutoConflict : Bool;
-   END_STRUCT;
-
-END_TYPE
-
-FUNCTION_BLOCK "SL_valve"
+﻿FUNCTION_BLOCK "SL_valve"
 { S7_Optimized_Access := 'TRUE' }
 VERSION : 0.1
    VAR_INPUT 
-      enable : Bool;
-      interlock : Bool;
-      auto : Bool;
-      manual : Bool;
-      reset : Bool;
-      stop : Bool;
-      run : Bool;
-      OpenCmd : Bool;
-      CloseCmd : Bool;
-      Button_Open : Bool;
-      Button_Close : Bool;
-      ActOpen : Bool;
-      ActClose : Bool;
+      Enable : Bool;
+      Interlock : Bool;
+      Auto : Bool;
+      Manual : Bool;
+      Rest : Bool;
+      Stop : Bool;
+      Run : Bool;
+      OpenCmd : Bool;   // Tin hieu gui tu khoi ben ngoai
+      CloseCmd : Bool;   // Tin hieu gui tu khoi ben ngoai
+      Button_Open : Bool;   // Nut nhan mo 
+      Button_Close : Bool;   // Nut nhan dong 
+      Sensor_open : Bool;   // Cam bien mo
+      Sensor_close : Bool;   // Cam bien dong
    END_VAR
 
    VAR_OUTPUT 
-      Busy : Bool;
-      Open : Bool;
-      Close : Bool;
-      Fault : Bool;
-      auto_mode : Bool;
-      manual_mode : Bool;
+      Busy : Bool;   // Tín hiệu làm interlock cho khối FB khác
+      Open : Bool;   // Xuat ra cho relay
+      Close : Bool;   // Xuat ra cho relay
+      Fault : Bool;   // Loi 
    END_VAR
 
    VAR 
-      Figure { S7_SetPoint := 'False'} : "valve";
-      LatchFault { S7_SetPoint := 'True'} : Bool;
-      Stop_state : Bool;
+      Figure { S7_SetPoint := 'False'} : "valve";   // Cac trang thai tin hieu cua van
+      LatchFault { S7_SetPoint := 'True'} : Bool;   // Lỗi trung gian
+      Stop_state : Bool := true;   // Biến nhớ của nút E-STOP
       TonOpen {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
       TonClose {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
    END_VAR
 
 
 BEGIN
-	IF #reset THEN
+	IF #Rest THEN
 	    #Busy := 0;
 	    #Open := 0;
 	    #Fault := 0;
@@ -65,14 +43,17 @@ BEGIN
 	    #Figure.AutoConflict := 0;
 	    #Close := 0;
 	    #LatchFault := 0;
+	    #Stop_state := 0;
+	    #Figure.Auto := 0;
+	    #Figure.Manual := 0;
 	END_IF;
 	
-	IF #run THEN
+	IF #Run THEN
 	    #Stop_state := 0;
 	END_IF;
 	
 	//Emergency stop
-	IF #stop THEN
+	IF #Stop THEN
 	    #Stop_state := 1;
 	    #Open := 0;
 	    #Close := 0;
@@ -82,36 +63,30 @@ BEGIN
 	    #Figure.ManClose := 0;
 	ELSE
 	    //Dieu kien de chay van
-	    IF #enable AND #interlock AND NOT #Stop_state THEN
+	    IF #Enable AND #Interlock THEN
 	        #Busy := 1;
-	        IF #auto AND NOT #manual AND NOT #LatchFault THEN
+	        IF #Auto AND NOT #Manual AND NOT #LatchFault THEN
 	            #Figure.Auto := 1;
 	            #Figure.Manual := 0;
 	            #Figure.ManClose := 0;
 	            #Figure.ManOpen := 0;
-	            #auto_mode := 1;
-	            #manual_mode := 0;
-	        ELSIF #manual AND NOT #auto AND NOT #LatchFault THEN
+	        ELSIF #Manual AND NOT #Auto THEN
 	            #Figure.Auto := 0;
 	            #Figure.Manual := 1;
 	            #Figure.AutoClose := 0;
 	            #Figure.AutoOpen := 0;
-	            #auto_mode := 0;
-	            #manual_mode := 1;
 	        END_IF;
 	        //relay open
-	        IF (#Figure.AutoOpen AND NOT #Figure.FaultOpen)
-	            OR (#Figure.ManOpen AND NOT #Figure.ManClose)
-	            AND NOT #Figure.AutoConflict THEN
+	        IF (#Figure.AutoOpen AND NOT #Figure.FaultOpen AND NOT #Figure.AutoConflict)
+	            OR (#Figure.ManOpen AND NOT #Figure.ManClose) THEN
 	            #Open := 1;
 	            #Figure.Close := 0;
 	        ELSE
 	            #Open := 0;
 	        END_IF;
 	        //relay close
-	        IF (#Figure.AutoClose AND NOT #Figure.FaultClose)
-	            OR (#Figure.ManClose AND NOT #Figure.ManOpen)
-	            AND NOT #Figure.AutoConflict THEN
+	        IF (#Figure.AutoClose AND NOT #Figure.FaultClose AND NOT #Figure.AutoConflict)
+	            OR (#Figure.ManClose AND NOT #Figure.ManOpen) THEN
 	            #Close := 1;
 	            #Figure.Open := 0;
 	        ELSE
@@ -123,8 +98,6 @@ BEGIN
 	        #Figure.Close := 0;
 	        #Close := 0;
 	        #Open := 0;
-	        #Figure.Manual := 0;
-	        #Figure.Auto := 0;
 	        #Figure.AutoOpen := 0;
 	        #Figure.AutoClose := 0;
 	        #Figure.ManOpen := 0;
@@ -132,24 +105,24 @@ BEGIN
 	    END_IF;
 	END_IF;
 	
-	#TonOpen(IN := #Open AND #Figure.Auto AND NOT #ActOpen,
+	#TonOpen(IN := #Open AND #Figure.Auto AND NOT #Sensor_open,
 	         PT := #Figure.TimeOut);
-	#TonClose(IN := #Close AND #Figure.Auto AND NOT #ActClose,
+	#TonClose(IN := #Close AND #Figure.Auto AND NOT #Sensor_close,
 	          PT := #Figure.TimeOut);
 	//Auto mode
-	IF #Figure.Auto AND NOT #Figure.Manual THEN
+	IF #Figure.Auto AND NOT #Figure.Manual AND NOT #Stop_state THEN
 	    //valve open
 	    IF #OpenCmd AND NOT #CloseCmd THEN
 	        #Figure.AutoOpen := 1;
-	        IF #TonOpen.Q AND NOT #ActOpen THEN
+	        IF #TonOpen.Q AND NOT #Sensor_open THEN
 	            #Figure.Open := 0;
 	            #Figure.FaultOpen := 1;
-	        ELSIF NOT #TonOpen.Q AND #ActOpen THEN
+	        ELSIF NOT #TonOpen.Q AND #Sensor_open THEN
 	            #Figure.Open := 1;
 	        END_IF;
-	    ELSIF NOT #OpenCmd THEN
+	    ELSE
 	        #Figure.AutoOpen := 0;
-	        IF NOT #ActOpen THEN
+	        IF NOT #Sensor_open THEN
 	            #Figure.Open := 0;
 	        END_IF;
 	    END_IF;
@@ -157,15 +130,15 @@ BEGIN
 	    //vavle close
 	    IF #CloseCmd AND NOT #OpenCmd THEN
 	        #Figure.AutoClose := 1;
-	        IF #TonClose.Q AND NOT #ActClose THEN
+	        IF #TonClose.Q AND NOT #Sensor_close THEN
 	            #Figure.Close := 0;
 	            #Figure.FaultClose := 1;
-	        ELSIF NOT #TonClose.Q AND #ActClose THEN
+	        ELSIF NOT #TonClose.Q AND #Sensor_close THEN
 	            #Figure.Close := 1;
 	        END_IF;
-	    ELSIF NOT #CloseCmd THEN
+	    ELSE
 	        #Figure.AutoClose := 0;
-	        IF NOT #ActClose THEN
+	        IF NOT #Sensor_close THEN
 	            #Figure.Close := 0;
 	        END_IF;
 	    END_IF;
@@ -177,20 +150,20 @@ BEGIN
 	END_IF;
 	
 	//Manual mode
-	IF #Figure.Manual AND NOT #Figure.Auto THEN
+	IF #Figure.Manual AND NOT #Figure.Auto AND NOT #Stop_state THEN
 	    //valve open
 	    #Figure.ManClose := #Button_Close;
 	    #Figure.ManOpen := #Button_Open;
 	    
 	    //valve open
-	    IF #ActOpen THEN
+	    IF #Sensor_open THEN
 	        #Figure.Open := 1;
 	    ELSE
 	        #Figure.Open := 0;
 	    END_IF;
 	    
 	    //valve close
-	    IF #ActClose THEN
+	    IF #Sensor_close THEN
 	        #Figure.Close := 1;
 	    ELSE
 	        #Figure.Close := 0;
