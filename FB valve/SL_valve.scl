@@ -1,0 +1,208 @@
+﻿TYPE "valve"
+VERSION : 0.1
+   STRUCT
+      Run : Bool;
+      Auto : Bool;
+      Manual : Bool;
+      TimeOut : Time := T#5s;
+      Open : Bool;
+      Close : Bool;
+      ManOpen : Bool;
+      ManClose : Bool;
+      AutoOpen : Bool;
+      AutoClose : Bool;
+      FaultOpen : Bool;
+      FaultClose : Bool;
+      AutoConflict : Bool;
+   END_STRUCT;
+
+END_TYPE
+
+FUNCTION_BLOCK "SL_valve"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      enable : Bool;
+      interlock : Bool;
+      auto : Bool;
+      manual : Bool;
+      reset : Bool;
+      stop : Bool;
+      run : Bool;
+      OpenCmd : Bool;
+      CloseCmd : Bool;
+      Button_Open : Bool;
+      Button_Close : Bool;
+      ActOpen : Bool;
+      ActClose : Bool;
+   END_VAR
+
+   VAR_OUTPUT 
+      Busy : Bool;
+      Open : Bool;
+      Close : Bool;
+      Fault : Bool;
+      auto_mode : Bool;
+      manual_mode : Bool;
+   END_VAR
+
+   VAR 
+      Figure { S7_SetPoint := 'False'} : "valve";
+      LatchFault { S7_SetPoint := 'True'} : Bool;
+      Stop_state : Bool;
+      TonOpen {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
+      TonClose {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+   END_VAR
+
+
+BEGIN
+	IF #reset THEN
+	    #Busy := 0;
+	    #Open := 0;
+	    #Fault := 0;
+	    #Figure.FaultClose := 0;
+	    #Figure.FaultOpen := 0;
+	    #Figure.AutoConflict := 0;
+	    #Close := 0;
+	    #LatchFault := 0;
+	END_IF;
+	
+	IF #run THEN
+	    #Stop_state := 0;
+	END_IF;
+	
+	//Emergency stop
+	IF #stop THEN
+	    #Stop_state := 1;
+	    #Open := 0;
+	    #Close := 0;
+	    #Figure.AutoOpen := 0;
+	    #Figure.AutoClose := 0;
+	    #Figure.ManOpen := 0;
+	    #Figure.ManClose := 0;
+	ELSE
+	    //Dieu kien de chay van
+	    IF #enable AND #interlock AND NOT #Stop_state THEN
+	        #Busy := 1;
+	        IF #auto AND NOT #manual AND NOT #LatchFault THEN
+	            #Figure.Auto := 1;
+	            #Figure.Manual := 0;
+	            #Figure.ManClose := 0;
+	            #Figure.ManOpen := 0;
+	            #auto_mode := 1;
+	            #manual_mode := 0;
+	        ELSIF #manual AND NOT #auto AND NOT #LatchFault THEN
+	            #Figure.Auto := 0;
+	            #Figure.Manual := 1;
+	            #Figure.AutoClose := 0;
+	            #Figure.AutoOpen := 0;
+	            #auto_mode := 0;
+	            #manual_mode := 1;
+	        END_IF;
+	        //relay open
+	        IF (#Figure.AutoOpen AND NOT #Figure.FaultOpen)
+	            OR (#Figure.ManOpen AND NOT #Figure.ManClose)
+	            AND NOT #Figure.AutoConflict THEN
+	            #Open := 1;
+	            #Figure.Close := 0;
+	        ELSE
+	            #Open := 0;
+	        END_IF;
+	        //relay close
+	        IF (#Figure.AutoClose AND NOT #Figure.FaultClose)
+	            OR (#Figure.ManClose AND NOT #Figure.ManOpen)
+	            AND NOT #Figure.AutoConflict THEN
+	            #Close := 1;
+	            #Figure.Open := 0;
+	        ELSE
+	            #Close := 0;
+	        END_IF;
+	    ELSE
+	        #Busy := 0;
+	        #Figure.Open := 0;
+	        #Figure.Close := 0;
+	        #Close := 0;
+	        #Open := 0;
+	        #Figure.Manual := 0;
+	        #Figure.Auto := 0;
+	        #Figure.AutoOpen := 0;
+	        #Figure.AutoClose := 0;
+	        #Figure.ManOpen := 0;
+	        #Figure.ManClose := 0;
+	    END_IF;
+	END_IF;
+	
+	#TonOpen(IN := #Open AND #Figure.Auto AND NOT #ActOpen,
+	         PT := #Figure.TimeOut);
+	#TonClose(IN := #Close AND #Figure.Auto AND NOT #ActClose,
+	          PT := #Figure.TimeOut);
+	//Auto mode
+	IF #Figure.Auto AND NOT #Figure.Manual THEN
+	    //valve open
+	    IF #OpenCmd AND NOT #CloseCmd THEN
+	        #Figure.AutoOpen := 1;
+	        IF #TonOpen.Q AND NOT #ActOpen THEN
+	            #Figure.Open := 0;
+	            #Figure.FaultOpen := 1;
+	        ELSIF NOT #TonOpen.Q AND #ActOpen THEN
+	            #Figure.Open := 1;
+	        END_IF;
+	    ELSIF NOT #OpenCmd THEN
+	        #Figure.AutoOpen := 0;
+	        IF NOT #ActOpen THEN
+	            #Figure.Open := 0;
+	        END_IF;
+	    END_IF;
+	    
+	    //vavle close
+	    IF #CloseCmd AND NOT #OpenCmd THEN
+	        #Figure.AutoClose := 1;
+	        IF #TonClose.Q AND NOT #ActClose THEN
+	            #Figure.Close := 0;
+	            #Figure.FaultClose := 1;
+	        ELSIF NOT #TonClose.Q AND #ActClose THEN
+	            #Figure.Close := 1;
+	        END_IF;
+	    ELSIF NOT #CloseCmd THEN
+	        #Figure.AutoClose := 0;
+	        IF NOT #ActClose THEN
+	            #Figure.Close := 0;
+	        END_IF;
+	    END_IF;
+	    
+	    //fault
+	    IF #OpenCmd AND #CloseCmd THEN
+	        #Figure.AutoConflict := 1;
+	    END_IF;
+	END_IF;
+	
+	//Manual mode
+	IF #Figure.Manual AND NOT #Figure.Auto THEN
+	    //valve open
+	    #Figure.ManClose := #Button_Close;
+	    #Figure.ManOpen := #Button_Open;
+	    
+	    //valve open
+	    IF #ActOpen THEN
+	        #Figure.Open := 1;
+	    ELSE
+	        #Figure.Open := 0;
+	    END_IF;
+	    
+	    //valve close
+	    IF #ActClose THEN
+	        #Figure.Close := 1;
+	    ELSE
+	        #Figure.Close := 0;
+	    END_IF;
+	END_IF;
+	
+	IF #Figure.FaultClose OR #Figure.FaultOpen OR #Figure.AutoConflict THEN
+	    #LatchFault := 1;
+	END_IF;
+	#Fault := #LatchFault;
+	
+	
+	
+END_FUNCTION_BLOCK
+
