@@ -1,0 +1,104 @@
+﻿FUNCTION_BLOCK "FB_Tank"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      Enable : Bool;
+      Reset : Bool;
+      InSensorLow : Bool;
+      InSensorHigh : Bool;
+      Interlock : Bool;
+   END_VAR
+
+   VAR_OUTPUT 
+      Empty : Bool;
+      Valid : Bool;
+      Full : Bool;
+      Fault : Bool;
+   END_VAR
+
+   VAR 
+      Config { S7_SetPoint := 'False'} : "Tank";
+      TonLowOn {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      TonLowOff {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      TonHighOn {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      TonHighOff {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      TonConflict {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      Interlock_Fault { S7_SetPoint := 'True'} : Bool;
+      Latch_Ready : Bool;
+   END_VAR
+
+
+BEGIN
+	IF #Reset THEN
+	    #Config.LowSensor_Fault := 0;
+	    #Config.HighSensor_Fault := 0;
+	    #Config.LevelConflict := 0;
+	END_IF;
+	
+	//Cho phep hoat dong
+	#Latch_Ready := #Enable AND #Interlock;
+	#Interlock_Fault := #Enable AND NOT #Interlock;
+	
+	//Highsensor_Fault và Lowsensor_Fault là các do cấu hình phần cứng của con cảm biến
+	
+	//nhan tin hieu cua cam bien muc cao
+	#TonHighOn(IN := #Latch_Ready AND NOT #Config.HighSensor_Fault AND #InSensorHigh,
+	           PT := #Config.HighDelay);
+	
+	#TonHighOff(IN := #Latch_Ready AND NOT #Config.HighSensor_Fault AND NOT #InSensorHigh,
+	            PT := #Config.HighDelay);
+	
+	//nhan tin hieu cua cam bien muc thap
+	#TonLowOn(IN := #Latch_Ready AND NOT #Config.LowSensor_Fault AND #InSensorLow,
+	          PT := #Config.LowDelay);
+	
+	#TonLowOff(IN := #Latch_Ready AND NOT #Config.LowSensor_Fault AND NOT #InSensorLow,
+	           PT := #Config.LowDelay);
+	
+	//luu trang thai thuc sau nhieu
+	IF #Latch_Ready THEN
+	    IF #TonHighOn.Q THEN
+	        #Config.SensorHigh := 1;
+	    END_IF;
+	    IF #TonHighOff.Q THEN
+	        #Config.SensorHigh := 0;
+	    END_IF;
+	    IF #TonLowOn.Q THEN
+	        #Config.SensorLow := 1;
+	    END_IF;
+	    IF #TonLowOff.Q THEN
+	        #Config.SensorLow := 0;
+	    END_IF;
+	END_IF;
+	
+	//trang thai dau ra
+	#Config.Empty := NOT #Config.SensorHigh AND NOT #Config.SensorLow;
+	#Config.Valid := #Config.SensorLow AND NOT #Config.SensorHigh;
+	#Config.Invalid := #Config.SensorHigh AND NOT #Config.SensorLow;
+	#Config.Full := #Config.SensorHigh AND #Config.SensorLow;
+	
+	//Loi xung dot cam bien
+	#TonConflict(IN := #Latch_Ready AND #Config.Invalid,
+	             PT := #Config.ConflictDelay);
+	IF #TonConflict.Q THEN
+	    #Config.LevelConflict := 1;
+	END_IF;
+	
+	//loi tong hop
+	#Fault := #Config.LevelConflict OR #Config.LowSensor_Fault OR #Config.HighSensor_Fault OR #Interlock_Fault;
+	
+	//gan cac bien trang thai cho DB_Alarm
+	(*#Config.Empty := DB_Alarm.....;
+	#Config.Valid := DB_Alarm.....;
+	#Config.Invalid := DB_Alarm.....;
+	#Config.Full := DB_Alarm.....;
+	*)
+	
+	//dau ra output
+	#Empty := #Config.Empty;
+	#Valid := #Config.Valid;
+	#Full := #Config.Full;
+	
+	
+END_FUNCTION_BLOCK
+

@@ -1,0 +1,18 @@
+﻿TYPE "Tank"
+VERSION : 0.1
+   STRUCT
+      LowDelay : Time := T#5s;
+      HighDelay : Time := T#5s;
+      Full : Bool;
+      Valid : Bool;
+      Empty : Bool;
+      Invalid : Bool;
+      LowSesor_Fault : Bool;
+      HighSensor_Fault : Bool;
+      LevelConflict : Bool;
+      SensorLow : Bool;
+      SensorHigh : Bool;
+   END_STRUCT;
+
+END_TYPE
+

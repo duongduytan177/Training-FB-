@@ -1,0 +1,200 @@
+﻿FUNCTION_BLOCK "FB_Status"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      Enable : Bool;
+      AutoMode : Bool;
+      CmdStart : Bool;
+      CmdStop : Bool;
+      CmdResetFault : Bool;
+      FB_Running : Bool;
+      Interlock : Bool;
+      ExternalFault : Bool;
+      StartTimeOut : Time := T#5S;
+      StopTimeOut : Time := T#5S;
+   END_VAR
+
+   VAR_OUTPUT 
+      DoStart : Bool;
+      DoStop : Bool;
+      stStatus : "stISM_Status";
+   END_VAR
+
+   VAR 
+      State : USInt;
+      NextState : USInt;
+      StateInit : Bool;
+      tonTimeout {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
+      tonStateTime {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      FaultLatched { S7_SetPoint := 'True'} : Bool;
+      FaultCode : USInt;
+      StartReq : Bool;
+      StopReq : Bool;
+      status { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'; S7_SetPoint := 'False'} : "eISM_State";
+   END_VAR
+
+
+BEGIN
+	#DoStart := FALSE;
+	#DoStop := FALSE;
+	
+	#StartReq := #CmdStart AND NOT #CmdStop;
+	#StopReq := #CmdStop;
+	
+	#tonStateTime(IN := #Enable,
+	              PT := T#24H);
+	#stStatus.StateTime := #tonStateTime.ET;
+	
+	// -------------------- Enable / Fault handling --------------------
+	IF NOT #Enable THEN
+	    #State := #status.Idle;
+	    #NextState := #status.Idle;
+	    #StateInit := FALSE;
+	    
+	    #tonTimeout(IN := FALSE, PT:= #StopTimeOut);
+	    #tonStateTime(IN := FALSE, PT:=#StartTimeOut );
+	    
+	ELSE
+	    // latch external fault
+	    IF #ExternalFault THEN
+	        #FaultLatched := TRUE;
+	        #FaultCode := 3; // 3 = external fault (umownie)
+	        #NextState := #status.Error;
+	    END_IF;
+	    
+	    // reset fault
+	    IF #CmdResetFault THEN
+	        #FaultLatched := FALSE;
+	        #FaultCode := 0;
+	        IF #State = #status.Error THEN
+	            #NextState := #status.Idle;
+	        END_IF;
+	    END_IF;
+	    
+	    IF #FaultLatched THEN
+	        #NextState := #status.Error;
+	    END_IF;
+	    
+	    // -------------------- AUTO / MANUAL --------------------
+	    IF #AutoMode THEN
+	        CASE #State OF
+	            0 :
+	                IF NOT #StateInit THEN
+	                    #StateInit := TRUE;
+	                    #tonTimeout(IN := FALSE,
+	                                PT := #StartTimeOut);
+	                    #stStatus.StateName := 'NOT WORKING';
+	                END_IF;
+	                
+	                IF #StartReq THEN
+	                    IF #Interlock THEN
+	                        #NextState := #status.Starting;
+	                    ELSE
+	                        #FaultLatched := TRUE;
+	                        #FaultCode := 1; // 1 = interlock
+	                        #NextState := #status.Error;
+	                    END_IF;
+	                END_IF;
+	            10:
+	                #DoStart := TRUE;
+	                
+	                IF NOT #StateInit THEN
+	                    #StateInit := TRUE;
+	                    #tonTimeout(IN := TRUE,
+	                                PT := #StartTimeOut);
+	                END_IF;
+	                
+	                IF #FB_Running THEN
+	                    #NextState := #status.Running;
+	                END_IF;
+	                
+	                IF #tonTimeout.Q THEN
+	                    #FaultLatched := TRUE;
+	                    #FaultCode := 2; // 2 = start timeout
+	                    #NextState := #status.Error;
+	                END_IF;
+	                
+	                IF #StopReq THEN
+	                    #NextState := #status.Stopping;
+	                END_IF;
+	                #stStatus.StateName := 'STARTING';
+	            20:
+	                #DoStart := TRUE;
+	                
+	                IF NOT #Interlock THEN
+	                    #FaultLatched := TRUE;
+	                    #FaultCode := 1; // interlock
+	                    #NextState := #status.Error;
+	                END_IF;
+	                
+	                IF NOT #FB_Running THEN
+	                    #FaultLatched := TRUE;
+	                    #FaultCode := 4; // 4 = feedback mismatch
+	                    #NextState := #status.Error;
+	                END_IF;
+	                
+	                IF #StopReq THEN
+	                    #NextState := #status.Stopping;
+	                END_IF;
+	                #stStatus.StateName := 'RUNNING';
+	            30:
+	                #DoStop := TRUE;
+	                
+	                IF NOT #StateInit THEN
+	                    #StateInit := TRUE;
+	                    #tonTimeout(IN := TRUE,
+	                                PT := #StopTimeOut);
+	                END_IF;
+	                
+	                IF NOT #FB_Running THEN
+	                    #NextState := #status.Idle;
+	                END_IF;
+	                
+	                IF #tonTimeout.Q THEN
+	                    #FaultLatched := TRUE;
+	                    #FaultCode := 5; // 5 = stop timeout
+	                    #NextState := #status.Error;
+	                END_IF;
+	                #stStatus.StateName := 'STOPING';
+	            100:
+	                #DoStart := FALSE;
+	                #DoStop := TRUE;
+	                #stStatus.StateName := 'FAULT';
+	                
+	        END_CASE;
+	
+	    ELSE
+	        #DoStart := #CmdStart AND #Interlock AND NOT #FaultLatched AND NOT #ExternalFault;
+	        #DoStop := #CmdStop;
+	        
+	        IF #FB_Running THEN
+	            #NextState := #status.Running;
+	        ELSE
+	            #NextState := #status.Idle;
+	        END_IF;
+	    END_IF;
+	    
+	    IF #NextState <> #State THEN
+	        #stStatus.PrevState := #State;
+	        #State := #NextState;
+	        
+	        #StateInit := FALSE;
+	        
+	        #tonTimeout(IN := FALSE,PT:=#StopTimeOut );
+	        #tonStateTime(IN := FALSE, PT:=#StartTimeOut );
+	    END_IF;
+	    
+	END_IF;
+	
+	#stStatus.State := #State;
+	#stStatus.Auto := #AutoMode AND #Enable;
+	#stStatus.Manual := (NOT #AutoMode) AND #Enable;
+	
+	#stStatus.Busy := (#State = #status.Starting) OR (#State = #status.Stopping);
+	#stStatus.Running := (#State = #status.Running);
+	
+	#stStatus.FaultLatched := #FaultLatched;
+	#stStatus.FaultActive := (#State = #status.Error);
+	#stStatus.FaultCode := #FaultCode;
+END_FUNCTION_BLOCK
+
