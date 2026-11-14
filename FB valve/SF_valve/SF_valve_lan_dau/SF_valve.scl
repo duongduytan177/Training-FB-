@@ -1,0 +1,145 @@
+﻿FUNCTION_BLOCK "SF_valve"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      Enable : Bool;
+      Interlock : Bool;
+      Run : Bool;
+      Stop : Bool;
+      Reset : Bool;
+      Auto : Bool;
+      Manual : Bool;
+      RightCmd : Bool;
+      LeftCmd : Bool;
+      Button_Right : Bool;
+      Button_Left : Bool;
+      Sensor_Right : Bool;
+      Sensor_Left : Bool;
+   END_VAR
+
+   VAR_OUTPUT 
+      Fault : Bool;
+      Right : Bool;
+      Left : Bool;
+      Busy : Bool;
+      Stop_state : Bool;
+      Run_state : Bool;
+      Feedback : Bool;
+   END_VAR
+
+   VAR 
+      Config { S7_SetPoint := 'False'} : "valve_sf";
+      Mem_man_Right : Bool;
+      Mem_man_Left : Bool;
+      TonRight {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
+      TonLeft {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+   END_VAR
+
+
+BEGIN
+	IF #Reset THEN
+	    #Fault := 0;
+	    #Busy := 0;
+	    #Config.Auto := 0;
+	    #Config.Manual := 0;
+	END_IF;
+	
+	IF #Stop THEN
+	    #Stop_state := 1;
+	    #Run_state := 0;
+	END_IF;
+	
+	IF #Run THEN
+	    #Run_state := 1;
+	    #Stop_state := 0;
+	END_IF;
+	
+	IF #Enable AND #Interlock AND #Run_state THEN
+	    #Config.Run := 1;
+	    #Busy := 1;
+	ELSE
+	    #Config.Run := 0;
+	END_IF;
+	
+	IF #Config.Run AND #Auto AND NOT #Manual AND NOT #Fault THEN
+	    #Config.Auto := 1;
+	    #Config.Manual := 0;
+	ELSIF #Config.Run AND #Manual AND NOT #Auto AND NOT #Fault THEN
+	    #Config.Auto := 0;
+	    #Config.Manual := 1;
+	END_IF;
+	
+	//Auto
+	#TonRight(IN := NOT #Config.AutoRight AND #Config.Auto AND #RightCmd,
+	          PT := #Config.TimeOut);
+	#TonLeft(IN := NOT #Config.AutoLeft AND #Config.AutoRight AND #LeftCmd,
+	         PT := #Config.TimeOut);
+	
+	IF #TonRight.Q AND NOT #Sensor_Right THEN
+	    #Config.FaultRight := 1;
+	    #Config.AutoRight := 0;
+	ELSE
+	    #Config.FaultRight := 0;
+	    #Config.AutoRight := 1;
+	END_IF;
+	
+	IF #TonLeft.Q AND NOT #Sensor_Left THEN
+	    #Config.FaultLeft := 1;
+	    #Config.AutoLeft := 0;
+	ELSE
+	    #Config.FaultLeft := 0;
+	    #Config.AutoLeft := 1;
+	END_IF;
+	
+	IF #RightCmd AND #LeftCmd THEN
+	    #Config.AutoConflict := 1;
+	END_IF;
+	
+	//Manual
+	#Mem_man_Right := #Button_Right AND NOT #Button_Left AND #Config.Manual;
+	#Mem_man_Left := #Button_Left AND NOT #Button_Right AND #Config.Manual;
+	
+	#Config.ManRight := #Config.Manual AND #Sensor_Right;
+	#Config.ManLeft := #Config.Manual AND #Sensor_Left;
+	
+	//fault
+	#Fault := #Config.FaultLeft
+	        OR #Config.FaultRight
+	        OR #Config.AutoConflict
+	        OR NOT #Interlock;
+	
+	//dau ra relay
+	#Right := (#RightCmd AND NOT #Config.FaultRight AND NOT #Config.AutoConflict)
+	        OR m;
+	#Left := (#LeftCmd AND NOT #Config.FaultLeft AND NOT #Config.AutoConflict)
+	        OR #Mem_man_Left;
+	
+	//bao trang thai lam viec
+	IF #Config.AutoRight OR #Config.ManRight THEN
+	    #Config.Right := 1;
+	ELSE
+	    #Config.Right := 0;
+	END_IF;
+	
+	IF #Config.AutoLeft OR #Config.ManLeft THEN
+	    #Config.Left := 1;
+	ELSE
+	    #Config.Left := 0;
+	END_IF;
+	
+	
+	
+	
+	    
+	
+	
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+	    
+END_FUNCTION_BLOCK
+

@@ -1,0 +1,21 @@
+﻿TYPE "valve_sf"
+VERSION : 0.1
+   STRUCT
+      Run : Bool;
+      Stop : Bool;
+      Auto : Bool;
+      Manual : Bool;
+      Right : Bool;
+      Left : Bool;
+      AutoRight : Bool;
+      AutoLeft : Bool;
+      ManRight : Bool;
+      ManLeft : Bool;
+      FaultRight : Bool;
+      FaultLeft : Bool;
+      AutoConflict : Bool;
+      TimeOut : Time := T#5s;
+   END_STRUCT;
+
+END_TYPE
+

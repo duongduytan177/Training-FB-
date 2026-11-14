@@ -1,0 +1,122 @@
+﻿FUNCTION_BLOCK "SF_valve"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      Enable : Bool;
+      Interlock : Bool;
+      External_fault : Bool;
+      Run : Bool;
+      Stop : Bool;
+      Reset : Bool;
+      Auto : Bool;
+      Manual : Bool;
+      RightCmd : Bool;
+      LeftCmd : Bool;
+      Button_Right : Bool;
+      Button_Left : Bool;
+      Sensor_Right : Bool;
+      Sensor_Left : Bool;
+   END_VAR
+
+   VAR_OUTPUT 
+      Fault : Bool;
+      Right : Bool;
+      Left : Bool;
+      Busy : Bool;
+   END_VAR
+
+   VAR 
+      Config { S7_SetPoint := 'False'} : "valve_sf";
+      Mem_man_Right : Bool;
+      Mem_man_Left : Bool;
+      Stop_state : Bool;
+      TonRight {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
+      TonLeft {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+   END_VAR
+
+
+BEGIN
+	IF #Reset THEN
+	    #Config.FaultLeft := 0;
+	    #Config.FaultRight := 0;
+	    #Config.AutoConflict := 0;
+	    #Config.button_fault := 0;
+	    #Config.Interlock_fault := 0;
+	END_IF;
+	
+	//dong khan cap
+	IF #Stop THEN
+	    #Stop_state := 1;
+	END_IF;
+	
+	//chay lai khi dung
+	IF #Run THEN
+	    #Stop_state := 0;
+	END_IF;
+	
+	#Config.Run := #Enable AND #Interlock;
+	
+	IF NOT #Interlock THEN
+	    #Config.Interlock_fault := 1;
+	END_IF;
+	
+	//chon che do lam viec
+	IF #Config.Run AND #Auto AND NOT #Manual AND NOT #Fault THEN
+	    #Config.Auto := 1;
+	    #Config.Manual := 0;
+	ELSIF #Config.Run AND #Manual AND NOT #Auto AND NOT #Fault THEN
+	    #Config.Auto := 0;
+	    #Config.Manual := 1;
+	END_IF;
+	
+	//Auto
+	#TonRight(IN := #Right AND #Config.Auto AND NOT #Sensor_Left,
+	          PT := #Config.TimeOut);
+	#TonLeft(IN := #Left AND #Config.Auto AND NOT #Sensor_Right,
+	         PT := #Config.TimeOut);
+	
+	IF #TonRight.Q THEN
+	    #Config.FaultRight := 1;
+	END_IF;
+	
+	IF #TonLeft.Q THEN
+	    #Config.FaultLeft := 1;
+	END_IF;
+	
+	IF #RightCmd AND #LeftCmd THEN
+	    #Config.AutoConflict := 1;
+	END_IF;
+	
+	//Manual
+	#Mem_man_Right := #Button_Right AND NOT #Button_Left AND #Config.Manual;
+	#Mem_man_Left := #Button_Left AND NOT #Button_Right AND #Config.Manual;
+	
+	//fault
+	IF #External_fault THEN
+	    #Config.button_fault := 1;
+	END_IF;
+	
+	#Fault := #Config.FaultLeft
+	        OR #Config.FaultRight
+	        OR #Config.AutoConflict
+	        OR #Config.button_fault
+	        OR #Config.Interlock_fault;
+	
+	//dau ra relay
+	#Right := #Config.Run AND NOT #Stop_state
+	          AND ((#RightCmd AND NOT #Fault AND #Config.Auto AND NOT #LeftCmd )
+	             OR #Mem_man_Right);
+	#Left := #Config.Run AND NOT #Stop_state
+	          AND ((#LeftCmd AND NOT #Fault AND NOT #RightCmd AND #Config.Auto)
+	             OR #Mem_man_Left);
+	
+	//bao trang thai lam viec
+	#Config.Right := #Right OR (#Sensor_Left AND NOT #Sensor_Right);
+	#Config.Left := #Left OR (#Sensor_Right AND NOT #Sensor_Left);
+	             
+	
+	
+	
+	    
+END_FUNCTION_BLOCK
+
