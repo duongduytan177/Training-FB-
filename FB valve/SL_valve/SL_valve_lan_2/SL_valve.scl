@@ -1,0 +1,115 @@
+﻿FUNCTION_BLOCK "SL_valve"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      Enable : Bool;
+      Interlock : Bool;
+      Auto : Bool;
+      Manual : Bool;
+      Reset : Bool;
+      Stop : Bool;
+      Run : Bool;
+      OpenCmd : Bool;   // Tin hieu gui tu khoi ben ngoai
+      CloseCmd : Bool;   // Tin hieu gui tu khoi ben ngoai
+      Button_Open : Bool;   // Nut nhan mo 
+      Button_Close : Bool;   // Nut nhan dong 
+      Sensor_open : Bool;   // Cam bien mo
+      Sensor_close : Bool;   // Cam bien dong
+      External_Fault : Bool;   // Loi tu ben ngoai ( dung nut bam )
+   END_VAR
+
+   VAR_OUTPUT 
+      Busy : Bool;   // Tín hiệu làm interlock cho khối FB khác
+      Open : Bool;   // Xuat ra cho relay
+      Close : Bool;   // Xuat ra cho relay
+      Fault : Bool;   // Loi 
+   END_VAR
+
+   VAR 
+      Config { S7_SetPoint := 'False'} : "valve_sl";   // Cac trang thai tin hieu cua van
+      Stop_state : Bool := true;   // Biến nhớ của nút E-STOP
+      Latch_fault : Bool;
+      TonOpen {InstructionName := 'TON_TIME'; LibVersion := '1.0'; S7_SetPoint := 'False'} : TON_TIME;
+      TonClose {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+   END_VAR
+
+
+BEGIN
+	IF #Reset THEN
+	    #Config.Button_fault := 0;
+	    #Config.FaultClose := 0;
+	    #Config.FaultOpen := 0;
+	    #Config.AutoConflict := 0;
+	    #Config.InterLock_fault := 0;
+	END_IF;
+	
+	// dung khan cap
+	IF #Stop THEN
+	    #Stop_state := 1;
+	END_IF;
+	
+	//cho chay lai sau khi dung
+	IF #Run THEN
+	    #Stop_state := 0;
+	END_IF;
+	
+	#Busy := #Enable AND #Interlock;
+	
+	IF NOT #Interlock THEN
+	    #Config.InterLock_fault := 1;
+	END_IF;
+	
+	//chon che do lam viec
+	IF #Busy AND #Auto AND NOT #Manual AND NOT #Fault THEN
+	    #Config.Auto := 1;
+	    #Config.Manual := 0;
+	ELSIF #Busy AND #Manual AND NOT #Auto AND NOT #Fault THEN
+	    #Config.Auto := 0;
+	    #Config.Manual := 1;
+	END_IF;
+	
+	//che do auto
+	#TonOpen(IN := #Config.Auto AND #Open AND NOT #Sensor_open,
+	         PT := #Config.TimeOut);
+	
+	#TonClose(IN := #Config.Auto AND #Close AND NOT #Sensor_close,
+	          PT := #Config.TimeOut);
+	
+	IF #TonOpen.Q THEN // bao loi khi mo
+	    #Config.FaultOpen := 1;
+	END_IF;
+	
+	IF #TonClose.Q THEN // bao loi khi dong
+	    #Config.FaultClose := 1;
+	END_IF;
+	
+	IF #OpenCmd AND #CloseCmd THEN
+	    #Config.AutoConflict := 1;
+	END_IF;
+	
+	//loi
+	IF #External_Fault THEN
+	    #Config.Button_fault := 1;
+	END_IF;
+	
+	#Fault := #Config.AutoConflict
+	          OR #Config.FaultClose
+	          OR #Config.FaultOpen
+	          OR #Config.Button_fault
+	          OR #Config.InterLock_fault;
+	
+	//gui tin hieu cho ro le dieu khien van
+	#Open := #Busy AND NOT #Stop_state
+	        AND ((#Config.Auto AND #OpenCmd AND NOT #CloseCmd AND NOT #Fault)
+	            OR (#Config.Manual AND #Button_Open AND NOT #Button_Close));
+	#Close := #Busy AND NOT #Stop_state
+	        AND ((#Config.Auto AND #CloseCmd AND NOT #OpenCmd AND NOT #Fault)
+	            OR (#Config.Manual AND #Button_Close AND NOT #Button_Open));
+	
+	// bao len scada trang thai hoat dong hoac bien trung gian trong FB chinh
+	#Config.Open := #Open OR #Sensor_open;
+	#Config.Close := #Close OR #Sensor_close;
+	
+	
+END_FUNCTION_BLOCK
+
