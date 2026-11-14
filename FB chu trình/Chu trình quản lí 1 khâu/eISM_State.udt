@@ -1,0 +1,12 @@
+﻿TYPE "eISM_State"
+VERSION : 0.1
+   STRUCT
+      Idle : USInt;
+      Starting : USInt := 10;
+      Running : USInt := 20;
+      Stopping : USInt := 30;
+      Error : USInt := 100;
+   END_STRUCT;
+
+END_TYPE
+

@@ -1,0 +1,19 @@
+﻿TYPE "stISM_Status"
+VERSION : 0.1
+   STRUCT
+      State : USInt;   // aktualny stan
+      PrevState : USInt;   // poprzedni stan
+      StateName : String[16];   // opcjonalnie (do HMI/www)
+      StateTime : Time;   // czas w stanie
+      Auto : Bool;
+      Manual : Bool;
+      Busy : Bool;   // Starting/Stopping
+      Running : Bool;   // Running
+      FaultActive : Bool;   // jesteśmy w Error
+      FaultLatched : Bool;   // błąd zatrzaśnięty
+      FaultCode : USInt;   // kod błędu
+      FaultText : String[32];   // tekst błędu
+   END_STRUCT;
+
+END_TYPE
+
